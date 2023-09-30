@@ -1,12 +1,55 @@
 # coding=utf-8
 """
 @author B1lli
-@date 2023年09月28日 18:49:18
+@date 2023年09月30日 13:49:18
 @File:utils.py
 """
 import json
 import openai
 from plyer import notification
+import pygetwindow as gw
+import psutil
+import win32process
+import time
+import re
+from config import *
+
+config_dic = read_config ()
+
+
+openai.api_base = config_dic.get('llm请求地址')
+openai.api_key = config_dic.get('apikey')
+
+
+import os
+import datetime
+
+
+def write_log(content, log_type=None) :
+    # 获取AppData/Local路径
+    appdata_path = os.environ.get ( 'LOCALAPPDATA' )
+    focuser_dir = os.path.join ( appdata_path, 'Focuser' )
+
+    # 确保目录存在
+    if not os.path.exists ( focuser_dir ) :
+        os.makedirs ( focuser_dir )
+
+    log_file = os.path.join ( focuser_dir, 'log.txt' )
+
+    # 获取当前时间并格式化
+    current_time = datetime.datetime.now ().strftime ( '%Y-%m-%d %H:%M:%S' )
+
+    # 构建要写入的内容
+    log_content = f"{current_time}\n类型：{log_type}\n{content}\n"
+
+    # 写入文件
+    with open ( log_file, 'a' ) as file :
+        file.write ( log_content )
+
+
+# 使用方式:
+# write_log('你的内容', '你的类型')
+
 
 def send_notification(title, message):
     """
@@ -16,12 +59,36 @@ def send_notification(title, message):
         title (str): 通知的标题
         message (str): 通知的内容
     """
-    notification.notify(
-        title=title,
-        message=message,
-        app_name="YourAppName",  # 你可以替换为你的应用名称
-        timeout=10  # 通知显示的时间（秒）
-    )
+    try:
+        notification.notify(
+            title=title,
+            message=message,
+            app_name="YourAppName",  # 你可以替换为你的应用名称
+            timeout=10  # 通知显示的时间（秒）
+        )
+    except Exception as e:
+        print(f'send_notification报错了: {e}')
+
+def decode_chr(s):
+    if type(s) != str:print(f'本次decode_chr类型非str，为{type(s)}')
+    s = str(s)
+    s = s.replace('\\\\','\\')
+    pattern = re.compile(r'(\\u[0-9a-fA-F]{4}|\n)')
+    result = ''
+    pos = 0
+    while True:
+        match = pattern.search(s, pos)
+        if match is None:
+            break
+        result += s[pos:match.start()]
+        if match.group() == '\n':
+            result += '\n'
+        else:
+            result += chr(int(match.group()[2:], 16))
+        pos = match.end()
+    result += s[pos:]
+    return result
+
 
 class llm():
     def __init__(self,system_prompt=None,model='gpt-3.5-turbo-0613'):
@@ -127,3 +194,35 @@ def extract_json_from_text(text):
             return None
     else:
         return None
+
+
+
+def get_process_name_from_window_title(window_title):
+    if not window_title:return '未知'
+    windows = gw.getWindowsWithTitle(window_title)
+    if not windows:
+        return None
+
+    hwnd = windows[0]._hWnd
+    _, process_id = win32process.GetWindowThreadProcessId(hwnd)
+    try:
+        process = psutil.Process(process_id)
+        return process.name()
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+        return None
+
+
+def record_duration(window_title, process_name, start_time, window_durations, process_durations):
+    if window_title:
+        duration = time.time() - start_time
+        window_durations[window_title] = window_durations.get(window_title, 0) + duration
+        process_durations[process_name] = process_durations.get(process_name, 0) + duration
+    return window_durations, process_durations
+
+
+def display_statistics(window_durations, process_durations, switch_count):
+    for title, duration in window_durations.items():
+        print(f"用户在窗口 {title} 上总共停留了 {duration} 秒")
+    for process, duration in process_durations.items():
+        print(f"用户在进程 {process} 上总共停留了 {duration} 秒")
+    print(f"你总共切换了 {switch_count} 次窗口")
