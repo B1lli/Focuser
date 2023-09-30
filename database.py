@@ -67,21 +67,29 @@ class Database:
         timestamp = time.time ()
         formatted_time = datetime.fromtimestamp ( timestamp ).strftime ( '%Y-%m-%d %H:%M:%S' )
 
-        # 获取最后一个进程/窗口的timestamp
         cursor = self.conn.cursor ()
-        cursor.execute ( "SELECT timestamp FROM window_monitor ORDER BY timestamp DESC LIMIT 1" )
-        last_timestamp_row = cursor.fetchone ()
 
-        # 如果存在上一个进程/窗口，则计算focus_time，否则设置默认值
-        if last_timestamp_row :
-            last_timestamp = last_timestamp_row[0]
+        # 获取最后一个进程/窗口的timestamp和名称
+        cursor.execute ( "SELECT timestamp, process_name FROM window_monitor ORDER BY timestamp DESC LIMIT 1" )
+        last_record = cursor.fetchone ()
+
+        # 如果存在上一个进程/窗口，则计算focus_time，并为其更新focus_time
+        if last_record :
+            last_timestamp, last_process_name = last_record
             focus_time = timestamp - last_timestamp
+            cursor.execute (
+                "UPDATE window_monitor SET focus_time = ? WHERE timestamp = ?",
+                (focus_time, last_timestamp)
+            )
+        # 否则，为当前进程设置一个默认的focus_time
         else :
             focus_time = 0  # 或其他默认值
 
+        # 插入当前进程的记录
         cursor.execute (
             "INSERT INTO window_monitor (timestamp, formatted_time, window_title, process_name, focus_time) VALUES (?, ?, ?, ?, ?)",
-            (timestamp, formatted_time, window_title, process_name, focus_time) )
+            (timestamp, formatted_time, window_title, process_name, 0)  # 将当前进程的focus_time设置为0
+        )
 
         self.conn.commit ()
 
@@ -89,21 +97,81 @@ class Database:
         """Close the database connection."""
         self.conn.close()
 
-    def _query_focus_time(self, columns, group_by, limit,monitor_time):
-        end_time = time.time()
+    def _query_focus_time(self, columns, group_by, limit, monitor_time) :
+        import time
+
+        end_time = time.time ()
         start_time = end_time - monitor_time
 
-        cursor = self.conn.cursor()
-        cursor.execute(f"""
-        SELECT {', '.join(columns)}, SUM(focus_time) as total_focus_time
+        cursor = self.conn.cursor ()
+
+        # Query data that is directly within the monitor_time range
+        cursor.execute ( f"""
+        SELECT {', '.join ( columns )}, focus_time, timestamp
         FROM window_monitor 
         WHERE timestamp BETWEEN ? AND ?
-        GROUP BY {group_by}
-        ORDER BY total_focus_time DESC
-        LIMIT ?
-        """, (start_time, end_time, limit))
+        """, (start_time, end_time) )
 
-        return cursor.fetchall()
+        direct_data = cursor.fetchall ()
+        if not direct_data:
+            cursor.execute ( f"""
+            SELECT {', '.join ( columns )}, focus_time, timestamp
+            FROM window_monitor 
+            ORDER BY timestamp DESC
+            LIMIT 1
+            """ )
+            direct_data = cursor.fetchall ()
+
+        # Process the direct data
+        processed_data = []
+        for row in direct_data :
+            focus_time = row[-2]
+            timestamp = row[-1]
+            if focus_time == 0 :
+                focus_time = end_time - timestamp
+            processed_data.append ( list ( row[:-2] ) + [focus_time] )
+
+
+        # Query data that ended within the monitor_time range but started before it
+        cursor.execute ( f"""
+        SELECT {', '.join ( columns )}, focus_time, timestamp
+        FROM window_monitor 
+        WHERE (timestamp + focus_time) BETWEEN ? AND ?
+        """, (start_time, end_time) )
+
+        adjust_data = cursor.fetchall ()
+
+
+        # Process the adjust_data
+        for row in adjust_data :
+            window_start_time = row[-1]
+            window_focus_time = row[-2]
+
+            window_end_time = window_start_time + window_focus_time
+            focus_time_within_monitor_time = window_end_time - start_time
+
+            processed_data.append (list(row[:-2]) +[focus_time_within_monitor_time] )
+
+
+
+        # Group by the required columns and sum up the focus_time
+        aggregated_data = {}
+        for data in processed_data :
+            key = tuple ( data[:-1] )  # Using the values of the columns (except focus_time) as the key
+            aggregated_data[key] = aggregated_data.get ( key, 0 ) + data[-1]
+
+        # Convert the aggregated data into a list of tuples and sort based on focus_time
+        sorted_data = sorted ( aggregated_data.items (), key=lambda x : x[1], reverse=True )
+
+        # Limit the number of rows based on the 'limit' parameter
+        final_data = sorted_data[:limit]
+
+        # Convert the data back to the original format
+        result = []
+        for data, focus_time in final_data :
+            result.append ( list ( data ) + [focus_time] )
+
+        return result
 
     def query_most_focused_windows(self, monitor_time, focus_window_num):
         '''
@@ -157,8 +225,10 @@ class Database:
 if __name__ == "__main__":
     db = Database()
     # Test data insertion
-    db.insert_window_monitor_data("Test Window", "Test Process")
-    db.close()
+    # db.insert_window_monitor_data("Test Window", "Test Process")
+    # db.close()
+    a = db.query_most_focused_windows(monitor_time=300,focus_window_num=2)
+    print(a)
 
 
 
