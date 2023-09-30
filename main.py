@@ -86,27 +86,37 @@ def monitor_active_window():
 
 
 
-def assess_user_activity(user_goal=None,monitor_time=None,top_focused_window=2):
+def assess_user_activity(user_goal=None,monitor_time=None,top_focused_window=2,system_prompt=None):
     db = Database()
+    refiner = TitleRefiner ()
 
     if not monitor_time: monitor_time=10
     # 假设的函数来获取用户的目标
     if not user_goal: user_goal = get_user_goal()
     # 获取过去5分钟用户聚焦的进程
-    focus_processes = db.query_most_focused_processes(300, top_focused_window)
+    focus_processes = db.query_most_focused_processes(monitor_time, top_focused_window)
     # 获取过去5分钟用户聚焦的窗口
-    focus_windows = db.query_most_focused_windows(300, top_focused_window)
+    focus_windows = db.query_most_focused_windows(monitor_time, top_focused_window)
 
 
     # 构建提示字符串
-    prompt = f"这是你检测到的内容：\n\n用户的目标是{user_goal}\n你注意到，用户在过去的{monitor_time/60:.2f}分钟内，使用了"
+    prompt = f"这是你检测到的内容：\n你注意到，用户在过去的{monitor_time/60:.2f}分钟内，使用了"
     for process in focus_processes:
         prompt += f"约{process['focus_time']/60:.2f}分钟的{process['process_name']}，"
     prompt += f"聚焦时间最长的{top_focused_window}个窗口分别是"
     for window in focus_windows:
-        prompt += f"`{window['window_name']}（所属进程：{window['process_name']}）`，"
+        process_name = window['process_name']
+        window_name = refiner.refine(window['window_name'],process_name)
+        prompt += f"`{window_name}（所属进程：{process_name}）`，"
 
-    activity_checker = llm ( system_prompt='''你是雨禾，一个发言包含许多感叹号的元气少女，你会一步一步仔细思考，深呼吸，根据监控到的数据来判断用户正在做什么，是否为目标而努力，如果用户正在为了他的目标努力，则把notify_decision设置为false，不发出提醒打扰用户，而是默默鼓励用户，否则就将notify_decision设置为true，向用户发出提醒，然后返回一个类似这样的json：{
+
+    prompt += f"一步一步仔细思考，深呼吸，复述并解释用户正在看的内容是什么，是否符合用户的设定的目标：{user_goal}"
+    print(prompt)
+
+    write_log(prompt,log_type='user')
+
+    if not system_prompt:system_prompt = '''你是雨禾，一个发言包含许多感叹号的元气少女，你会一步一步仔细思考，深呼吸，根据监控到的数据来判断用户正在做什么，是否为目标而努力，如果用户正在为了他的目标努力，则把notify_decision设置为false，不发出提醒打扰用户，而是默默鼓励用户，否则就将notify_decision设置为true，向用户发出提醒，然后返回一个类似这样的json：
+    {
       "notify_decision": true,
       "notify_content": {
         "title": "不要走神啦！！",
@@ -116,9 +126,11 @@ def assess_user_activity(user_goal=None,monitor_time=None,top_focused_window=2):
     "notify_decision": false,
       "notify_content": {
         "title": "很好！",
-        "message": "雨禾发现你正在专心用pycharm写代码！继续加油！！"
+        "message": "雨禾发现你正在专心用哔哩哔哩看视频！继续加油！！"
       }
-    }''' )
+    }
+    复述我的要求，复述用户正在看的窗口和进程，然后完成我的要求'''
+    activity_checker = llm ( system_prompt=system_prompt )
 
     response = activity_checker.single_generate(prompt)
     write_log(content=response,log_type='assistant')
@@ -170,8 +182,8 @@ def main(page):
 
     # 界面窗口设置
     page.title = 'Focuser'
-    page.window_height = config_dic['窗口高度']
-    page.window_width = config_dic['窗口宽度']
+    page.window_height = float(config_dic['窗口高度'])
+    page.window_width = float(config_dic['窗口宽度'])
 
 
     global supervise_state, last_window_title, last_process_name, window_start_time, window_durations, process_durations, switch_count
@@ -187,13 +199,14 @@ def main(page):
             while supervise_state :
                 current_time = time.time ()
                 config_dic = read_config()
-                check_time = config_dic['提醒时间间隔（秒）']
+                check_time = float(config_dic.get('提醒时间间隔（秒）'))
                 top_focused_window = config_dic['top_focused_window']
+                system_prompt = config_dic.get('system_prompt')
 
                 # 每隔 check_time 调用 check_activity，时间没到就跳过
                 if current_time - last_check_time >= check_time :
                     print('准备向雨禾发消息')
-                    inform_dic = assess_user_activity (user_goal=db.get_latest_goal(),monitor_time=check_time,top_focused_window=top_focused_window)
+                    inform_dic = assess_user_activity (user_goal=db.get_latest_goal(),monitor_time=check_time,top_focused_window=top_focused_window,system_prompt=system_prompt)
                     print(f'inform_dic: {inform_dic}')
                     inform_user(inform_dic)
                     if inform_dic:
@@ -221,6 +234,7 @@ def main(page):
 
         # 当用户按下 Ctrl+C 时，显示每个窗口和进程的总停留时间
         page.clean ()
+        page_initialize ()
         # page.add(supervise_summary_lv)
         for title, duration in window_durations.items () :
             change_supervise_summary ( f"用户在窗口 {title} 上总共停留了 {duration} 秒" )
@@ -242,14 +256,15 @@ def main(page):
     监督启停相关方法
     '''
     def stop_supervise(e) :
+        change_activity_text('监督进程正在关闭中，请稍后...')
         db = Database()
         db.mark_goal_as_completed()
-        activity_text_lv.controls.clear()
-        page.update()
+        # activity_text_lv.controls.clear()
+        # page.update()
         stop_my_loop()
         time.sleep(0.5)
 
-        page_initialize()
+
 
     stop_supervise_btn = ft.ElevatedButton ( "停止监督", on_click=stop_supervise )
 
@@ -271,7 +286,7 @@ def main(page):
             page.add(stop_supervise_btn,activity_text_lv)
 
 
-            change_activity_text(f"雨禾开始认真监督你了！你的目标是：{user_goal}!雨禾每隔{read_config()['提醒时间间隔（秒）']}秒就会来看一眼你在干什么",color='green')
+            change_activity_text(f"雨禾开始认真监督你了！你的目标是：{user_goal}！\n雨禾每隔{read_config()['提醒时间间隔（秒）']}秒就会来看一眼你在干什么",color='green')
             start_my_loop()
 
     def start_my_loop() :
@@ -364,7 +379,7 @@ def main(page):
 
 
     page.horizontal_alignment = ft.CrossAxisAlignment.CENTER
-    ver_text = ft.Text ( 'Focuser V0.0.1  By B1lli', size=10, text_align=ft.alignment.center )
+    ver_text = ft.Text ( 'Focuser V0.0.2  By B1lli', size=10, text_align=ft.alignment.center )
     page_initialize()
     if not openai.api_key:change_activity_text('未检测到可用apikey，请在设置项里输入你的apikey，完成后请重启应用',color='red')
 
