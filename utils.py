@@ -20,7 +20,6 @@ config_dic = read_config ()
 openai.api_base = config_dic.get('llm请求地址')
 openai.api_key = config_dic.get('apikey')
 
-
 import os
 import datetime
 
@@ -43,7 +42,7 @@ def write_log(content, log_type=None) :
     log_content = f"{current_time}\n类型：{log_type}\n{content}\n"
 
     # 写入文件
-    with open ( log_file, 'a' ) as file :
+    with open ( log_file, 'a',encoding='utf-8' ) as file :
         file.write ( log_content )
 
 
@@ -226,3 +225,56 @@ def display_statistics(window_durations, process_durations, switch_count):
     for process, duration in process_durations.items():
         print(f"用户在进程 {process} 上总共停留了 {duration} 秒")
     print(f"你总共切换了 {switch_count} 次窗口")
+
+
+
+class TitleRefiner :
+
+    def __init__(self) :
+        # 对于每个进程名，在这里定义处理函数
+        self.processors = {
+            "msedge.exe" : self._edge_processor,
+            "chrome.exe" : self._chrome_processor,
+            "WeChat.exe" : self._wechat_processor,
+            "QQ.exe" : self._qq_processor,
+            "pycharm64.exe" : self._pycharm_processor,
+            "devenv.exe" : self._devenv_processor,
+        }
+
+    def refine(self, title: str, process_name: str) -> str :
+        processor = self.processors.get ( process_name )
+        if processor :
+            return processor ( title )
+        return title
+
+    def _edge_processor(self, title: str) -> str :
+        # 从“-”之前取核心信息
+        return title.split ( " -" )[0]
+
+    def _chrome_processor(self, title: str) -> str :
+        # 从“- GoogleChrome”之前取核心信息
+        return title.split ( " - GoogleChrome" )[0]
+
+    def _wechat_processor(self, title: str) -> str :
+        if title == "微信" :
+            return "微信聊天"
+        if title == "朋友圈" :
+            return "微信朋友圈"
+        return f"微信聊天 - {title}"
+
+    def _qq_processor(self, title: str) -> str :
+        return f"QQ聊天 - {title}"
+
+    def _pycharm_processor(self, title: str) -> str :
+        # 取文件名但不包括后缀
+        filename = title.split ( " " )[0]
+        return f"Python编程中 - {filename.split ( '.' )[0]}"
+
+    def _devenv_processor(self, title: str) -> str :
+        return f"VsCode编程中 - {title.split ( ' -' )[0]}"
+
+
+# 使用示例
+# refiner = TitleRefiner ()
+# print ( refiner.refine ( "崩坏3七周年同人放映厅 和另外 6个页面- 用户配置1-Microsoft Edge", "msedge.exe" ) )
+# print ( refiner.refine ( "微信", "WeChat.exe" ) )
