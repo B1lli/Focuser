@@ -15,7 +15,7 @@ import psutil
 import win32process
 import threading
 from utils import *
-from database import Database
+from database import *
 
 supervise_state = True
 last_window_title = None
@@ -85,13 +85,100 @@ def monitor_active_window():
         switch_count = 0
 
 
+def build_inform_dic(focus_processes, focus_windows, monitor_time, top_focused_window, user_goal) :
+    refiner = TitleRefiner ()
 
-def assess_user_activity(user_goal=None,monitor_time=None,top_focused_window=2,system_prompt=None):
+    # 构建提示字符串
+    prompt = f"这是你检测到的内容：\n你注意到，用户在过去的{monitor_time / 60:.2f}分钟内，使用了"
+    for process in focus_processes :
+        prompt += f"约{process['focus_time'] / 60:.2f}分钟的{process['process_name']}，"
+    prompt += f"聚焦时间最长的{top_focused_window}个窗口分别是"
+    for window in focus_windows :
+        process_name = window['process_name']
+        window_name = refiner.refine ( window['window_name'], process_name )
+        prompt += f"`{window_name}（所属进程：{process_name}）`，"
+
+    prompt += f"一步一步仔细思考，深呼吸，首先复述并解释用户正在看的内容是什么，然后判断其是否符合用户的设定的目标：{user_goal}"
+
+    return prompt
+
+
+
+
+def fetch_data_from_db(monitor_time, top_focused_window) :
+    db = Database ()
+    # 获取过去的 monitor_time 内用户聚焦的进程
+    focus_processes = db.query_most_focused_processes ( monitor_time, top_focused_window )
+    # 获取过去的 monitor_time 内用户聚焦的窗口
+    focus_windows = db.query_most_focused_windows ( monitor_time, top_focused_window )
+
+    return focus_processes, focus_windows
+
+
+
+
+# 修改后的 assess_user_activity 函数
+def assess_user_activity(user_goal=None, monitor_time=None, top_focused_window=2, system_prompt=None, focus_dic = None) :
+    if not monitor_time :
+        monitor_time = 10
+    # 获取用户的目标
+    if not user_goal :
+        user_goal = get_user_goal ()
+
+    # 使用新函数从数据库中取值，或直接传入
+    if not focus_dic:
+        focus_process, focus_windows = fetch_data_from_db ( monitor_time, top_focused_window )
+    else:
+        focus_process = focus_dic.get("focus_process")
+        focus_windows = focus_dic.get("focus_windows")
+
+
+    # 使用新函数来构建提示字符串
+    prompt = build_inform_dic ( focus_process, focus_windows, monitor_time, top_focused_window, user_goal )
+    print ( prompt )
+
+    write_log ( prompt, log_type='user' )
+
+    if not system_prompt :
+        system_prompt = '''你是雨禾，一个发言包含许多感叹号的元气少女，你会一步一步仔细思考，深呼吸，根据监控到的数据来判断用户正在做什么，是否为目标而努力，如果用户正在为了他的目标努力，则把notify_decision设置为false，不发出提醒打扰用户，而是默默鼓励用户，否则就将notify_decision设置为true，向用户发出提醒，然后返回一个类似这样的json：
+    {
+      "notify_decision": true,
+      "notify_content": {
+        "title": "不要走神啦！！",
+        "message": "你的目标是学英语！！为什么要打开哔哩哔哩看游戏视频！！不学英语的话就考不上大学了！！要专心思考啊！！"
+      }
+    } 
+    "notify_decision": false,
+      "notify_content": {
+        "title": "很好！",
+        "message": "雨禾发现你正在专心用哔哩哔哩看视频！继续加油！！"
+      }
+    }
+    复述我的要求，复述用户正在看的窗口和进程，然后完成我的要求'''
+    activity_checker = llm ( system_prompt=system_prompt )
+    try:
+        response = activity_checker.single_generate ( prompt )
+    except Exception as e:
+        print(f'assess_user_activity请求报错：{e}')
+
+    write_log ( content=response, log_type='assistant' )
+    try :
+        inform_dic = extract_json_from_text ( response )
+    except :
+        print ( 'assess_user_activity报错了' )
+        print ( '这是报错的response: ' + response )
+        inform_dic = {"notify_decision" : False}
+
+    return inform_dic
+
+
+
+def assess_user_activity_old(user_goal=None,monitor_time=None,top_focused_window=2,system_prompt=None):
     db = Database()
     refiner = TitleRefiner ()
 
     if not monitor_time: monitor_time=10
-    # 假设的函数来获取用户的目标
+    # 获取用户的目标
     if not user_goal: user_goal = get_user_goal()
     # 获取过去5分钟用户聚焦的进程
     focus_processes = db.query_most_focused_processes(monitor_time, top_focused_window)
@@ -110,7 +197,7 @@ def assess_user_activity(user_goal=None,monitor_time=None,top_focused_window=2,s
         prompt += f"`{window_name}（所属进程：{process_name}）`，"
 
 
-    prompt += f"一步一步仔细思考，深呼吸，复述并解释用户正在看的内容是什么，是否符合用户的设定的目标：{user_goal}"
+    prompt += f"一步一步仔细思考，深呼吸，首先复述并解释用户正在看的内容是什么，然后判断其是否符合用户的设定的目标：{user_goal}"
     print(prompt)
 
     write_log(prompt,log_type='user')
@@ -187,9 +274,11 @@ def main(page):
 
 
     global supervise_state, last_window_title, last_process_name, window_start_time, window_durations, process_durations, switch_count
-    def monitor_active_window(check_time) :
+    def monitor_active_window(check_time,monitor_limit_num=2) :
         global supervise_state, last_window_title, last_process_name, window_start_time, window_durations, process_durations, switch_count
 
+        window_durations = {}
+        process_durations = {}
         db = Database()
         last_window_title = None
         last_process_name = None
@@ -201,22 +290,47 @@ def main(page):
                 config_dic = read_config()
                 check_time = float(config_dic.get('提醒时间间隔（秒）'))
                 top_focused_window = config_dic['top_focused_window']
+                monitor_limit_num = top_focused_window
                 system_prompt = config_dic.get('system_prompt')
 
                 # 每隔 check_time 调用 check_activity，时间没到就跳过
                 if current_time - last_check_time >= check_time :
+                    # 排序 window and process durations，筛选出前monitor_limit_num个
+                    top_windows = sorted ( window_durations.items (), key=lambda item : item[1], reverse=True )[
+                                  :monitor_limit_num]
+                    top_processes = sorted ( process_durations.items (), key=lambda item : item[1], reverse=True )[
+                                    :monitor_limit_num]
+
+                    focus_windows_list = [
+                        {'window_name' : window[0], 'process_name' : get_process_name_from_window_title ( window[0] ),
+                         'focus_time' : window[1]} for window in top_windows]
+                    focus_processes_list = [{'process_name' : process[0], 'focus_time' : process[1]} for process in
+                                            top_processes]
+
+                    result = {
+                        "focus_process" : focus_processes_list,
+                        "focus_windows" : focus_windows_list
+                    }
+
                     print('准备向雨禾发消息')
-                    inform_dic = assess_user_activity (user_goal=db.get_latest_goal(),monitor_time=check_time,top_focused_window=top_focused_window,system_prompt=system_prompt)
+                    inform_dic = assess_user_activity (user_goal=db.get_latest_goal(),monitor_time=check_time,top_focused_window=top_focused_window,system_prompt=system_prompt,focus_dic=result)
                     print(f'inform_dic: {inform_dic}')
                     inform_user(inform_dic)
                     if inform_dic:
                         if inform_dic.get('notify_content'):change_activity_text (f"{inform_dic.get('notify_content').get('message')}",color='green' )
 
+                    # Reset the durations for the next cycle
+                    window_durations.clear ()
+                    process_durations.clear ()
                     last_check_time = current_time
 
-                current_window_title = gw.getActiveWindowTitle ()
-                if not current_window_title:current_window_title='未知'
+                current_window_title = gw.getActiveWindowTitle () or '未知'
                 current_process_name = get_process_name_from_window_title ( current_window_title )
+
+                # 只增加当前聚焦的窗口、进程的聚焦时间
+                window_durations[current_window_title] = window_durations.get ( current_window_title, 0 ) + 0.5
+                process_durations[current_process_name] = process_durations.get ( current_process_name, 0 ) + 0.5
+
 
                 if current_window_title != last_window_title or current_process_name != last_process_name :
                     # 如果窗口或进程发生变化，记录到数据库中
@@ -379,7 +493,8 @@ def main(page):
 
 
     page.horizontal_alignment = ft.CrossAxisAlignment.CENTER
-    ver_text = ft.Text ( 'Focuser V0.0.2  By B1lli', size=10, text_align=ft.alignment.center )
+    ver_text = ft.Text ( 'Focuser V0.0.3  By B1lli', size=10, text_align=ft.alignment.center )
+
     page_initialize()
     if not openai.api_key:change_activity_text('未检测到可用apikey，请在设置项里输入你的apikey，完成后请重启应用',color='red')
 
@@ -388,3 +503,4 @@ def main(page):
 
 if __name__ == '__main__':
     ft.app ( target=main )
+    # assess_user_activity(user_goal='写代码',monitor_time=300)
