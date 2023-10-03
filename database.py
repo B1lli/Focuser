@@ -106,6 +106,7 @@ class Database:
         cursor = self.conn.cursor ()
 
         # Query data that is directly within the monitor_time range
+        # print('正在检查窗口启动时间在监控时间内的项目')
         cursor.execute ( f"""
         SELECT {', '.join ( columns )}, focus_time, timestamp
         FROM window_monitor 
@@ -113,7 +114,10 @@ class Database:
         """, (start_time, end_time) )
 
         direct_data = cursor.fetchall ()
+        # print(direct_data)
+
         if not direct_data:
+            # print('没有direct_data，直接取数据库内最近使用的项目')
             cursor.execute ( f"""
             SELECT {', '.join ( columns )}, focus_time, timestamp
             FROM window_monitor 
@@ -121,6 +125,7 @@ class Database:
             LIMIT 1
             """ )
             direct_data = cursor.fetchall ()
+            # print ( direct_data )
 
         # Process the direct data
         processed_data = []
@@ -132,7 +137,10 @@ class Database:
             processed_data.append ( list ( row[:-2] ) + [focus_time] )
 
 
+
+
         # Query data that ended within the monitor_time range but started before it
+        # print('正在检查窗口启动时间在监控时间外的项目')
         cursor.execute ( f"""
         SELECT {', '.join ( columns )}, focus_time, timestamp
         FROM window_monitor 
@@ -140,6 +148,8 @@ class Database:
         """, (start_time, end_time) )
 
         adjust_data = cursor.fetchall ()
+        # print(adjust_data)
+
 
 
         # Process the adjust_data
@@ -153,6 +163,7 @@ class Database:
             processed_data.append (list(row[:-2]) +[focus_time_within_monitor_time] )
 
 
+        # print(f'加工后的数据为：\n{processed_data}')
 
         # Group by the required columns and sum up the focus_time
         aggregated_data = {}
@@ -160,11 +171,15 @@ class Database:
             key = tuple ( data[:-1] )  # Using the values of the columns (except focus_time) as the key
             aggregated_data[key] = aggregated_data.get ( key, 0 ) + data[-1]
 
+        # print(f'整合好的数据为：\n{aggregated_data}')
+
         # Convert the aggregated data into a list of tuples and sort based on focus_time
         sorted_data = sorted ( aggregated_data.items (), key=lambda x : x[1], reverse=True )
+        # print(f'排序好的数据为：\n{sorted_data}')
 
         # Limit the number of rows based on the 'limit' parameter
         final_data = sorted_data[:limit]
+        # print(f'排序好的数据为：\n{sorted_data}')
 
         # Convert the data back to the original format
         result = []
@@ -227,8 +242,11 @@ if __name__ == "__main__":
     # Test data insertion
     # db.insert_window_monitor_data("Test Window", "Test Process")
     # db.close()
-    a = db.query_most_focused_windows(monitor_time=300,focus_window_num=2)
-    print(a)
-
+    # a = db.query_most_focused_windows(monitor_time=300,focus_window_num=2)
+    # print(a)
+    # a = {
+    #     "process": {"pycharm64.exe" : 362, "msedge.exe" : 53},
+    #     "window":{"Python编程中 - Focuser":214,"Edge页面 - 编程助手":51}
+    # }
 
 
