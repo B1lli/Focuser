@@ -7,6 +7,18 @@
 import os
 import json
 
+default_data = {
+    "提醒时间间隔（秒）" : 300,
+    "apikey" : None,
+    "llm请求地址" : "https://api.openai.com/v1",
+    "窗口高度" : 400,
+    "窗口宽度" : 300,
+    "top_focused_window" : 2,
+    "top_focused_process" : 2,
+    "character_prompt" : "你是雨禾，一个发言包含许多感叹号的少女",
+    "tone_prompt" : "带感叹号的傲娇语气"
+}
+
 def set_default_config():
     """
     检查配置文件是否存在，如果不存在则设置默认配置。
@@ -18,35 +30,11 @@ def set_default_config():
         return
 
     # 否则，写入默认配置
-    default_data = {
-        "提醒时间间隔（秒）": 300,
-        "apikey" : None,
-        "llm请求地址": "https://api.openai.com/v1",
-        "窗口高度":400,
-        "窗口宽度":300,
-        "top_focused_window": 2,
-        "top_focused_process": 2,
-        "system_prompt":'''你是雨禾，一个发言包含许多感叹号的元气少女，你会一步一步仔细思考，深呼吸，根据监控到的数据来判断用户正在做什么，是否为目标而努力，如果用户正在为了他的目标努力，则把notify_decision设置为false，不发出提醒打扰用户，而是默默鼓励用户，否则就将notify_decision设置为true，向用户发出提醒，然后返回一个类似这样的json：{
-      "notify_decision": true,
-      "notify_content": {
-        "title": "不要走神啦！！",
-        "message": "你的目标是学英语！！为什么要打开哔哩哔哩看游戏视频！！不学英语的话就考不上大学了！！要专心思考啊！！"
-      }
-    } 
-    "notify_decision": false,
-      "notify_content": {
-        "title": "很好！",
-        "message": "雨禾发现你正在专心用哔哩哔哩看视频！继续加油！！"
-      }
-    }
-    复述我的要求，复述用户正在看的窗口和进程，然后完成我的要求'''
-    }
-
-
     os.makedirs(os.path.dirname(path), exist_ok=True)
 
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(default_data, f, ensure_ascii=False, indent=4)
+
 
 
 def save_config(data):
@@ -74,29 +62,40 @@ def save_config(data):
         json.dump(existing_data, f, ensure_ascii=False, indent=4)
 
 
-def read_config(keys=None) :
+def read_config(keys=None):
     """
     从 Appdata/Local/Focuser 文件夹中读取配置文件。
     如果配置文件或指定的关键字不存在，则对于该关键字返回 None。
     如果没有传入keys，则返回全部值。
 
-    :param keys: list or None, optional
+    :param keys: list or None or str, optional
         需要读取的关键字列表。默认为 None，代表读取所有配置。
-    :return: dict
+        如果有傻孩子传了字符串进来也没事，我会返回对应的值
+    :return: dict or str/int
         包含读取的配置信息的字典。
+        如果有傻孩子传了键字符串，那么就会返回键对应的值
     """
-    path = os.path.expandvars ( "%APPDATA%\\Local\\Focuser\\config.txt" )
+    path = os.path.expandvars("%APPDATA%\\Local\\Focuser\\config.txt")
 
-    if not os.path.exists ( path ) :
-        if keys :
-            return {key : None for key in keys}
-        else :
-            return {}
+    if not os.path.exists(path):
+        set_default_config()
 
-    with open ( path, 'r', encoding='utf-8' ) as f :
-        data = json.load ( f )
+    with open(path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
 
-    if keys :
-        return {key : data.get ( key, None ) for key in keys}
-    else :
-        return data
+    if type ( keys ) == str : return read_config().get(keys)
+
+    if keys:
+        result = {}
+        for key in keys:
+            if key in data:
+                result[key] = data[key]
+            else:
+                result[key] = default_data.get(key)
+                data[key] = default_data.get(key)
+                print(f"key值 {key} 不存在，已读取默认参数值：{result[key]}并写入配置文件")
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+        return result
+    else:
+        return {**default_data, **data}
