@@ -109,21 +109,24 @@ def build_inform_dic(focus_processes, focus_windows, monitor_time, top_focused_w
     prompt = ''
     prompt += f'{character_prompt}\n用户目标是“{user_goal}”，而这是你检测到的内容：'
     # 构建提示字符串
-    prompt += f"你注意到，用户在过去的{monitor_time / 60:.2f}分钟内，使用了"
-    for process in focus_processes :
-        prompt += f"约{process['focus_time'] / 60:.2f}分钟的{process['process_name']}，"
+    prompt += f"你注意到，用户在过去的{monitor_time / 60:.2f}分钟内，"
     prompt += f"聚焦时间最长的{top_focused_window}个窗口分别是"
     for window in focus_windows :
         process_name = window['process_name']
         window_name = refiner.refine ( window['window_name'], process_name )
         prompt += f"`{window_name}（所属进程：{process_name}）`，"
 
+    prompt += "使用了"
+    for process in focus_processes :
+        prompt += f"约{process['focus_time'] / 60:.2f}分钟的{process['process_name']}，"
+
+
     json_prompt = '''这是json格式示例：    
 {
-  "notify_decision": （一个布尔值，代表是否提醒）,
+  "notify_decision": （一个布尔值，代表是否提醒，如果用户正在完成目标，则设置为false）,
   "notify_content": {
-    "title": "（提醒的标题）",
-    "message": "（提醒用户他的目标是XX，而他现在又在做XX事情，敦促他赶快回去完成目标）"
+    "title": "（提醒的标题，如果用户正在完成目标则夸奖他）",
+    "message": "（如果用户正在完成目标则夸奖他，如果不在完成目标就提醒用户他的目标是XX而他现在又在做XX事情，敦促他赶快回去完成目标）"
   }
 }
 '''
@@ -179,6 +182,7 @@ def assess_user_activity(user_goal=None, monitor_time=None, top_focused_window=2
     except :
         print ( 'assess_user_activity报错了' )
         print ( '这是报错的response: ' + response )
+        write_log(f'assess_user_activity报错了:{response}',log_type='error')
         inform_dic = {"notify_decision" : False}
 
     return inform_dic
@@ -247,6 +251,7 @@ def inform_user(inform_dic) :
             message = inform_dic['notify_content']['message']
             send_notification ( title, message )
     except Exception as e :
+        write_log(f'inform_user报错了: {e}\n这是报错的inform_dic:{str ( inform_dic )}',log_type='error')
         print ( f'inform_user报错了: {e}' )
         print ( '这是报错的inform_dic: ' + str ( inform_dic ) )
 
@@ -548,11 +553,13 @@ def main(page) :
     user_goal_input = ft.TextField ( label="接下来，你准备...", hint_text="输入你的目标" )
 
     page.horizontal_alignment = ft.CrossAxisAlignment.CENTER
-    ver_text = ft.Text ( 'Focuser V0.0.4  By B1lli', size=10, text_align=ft.alignment.center )
+    page.vertical_alignment = ft.MainAxisAlignment.CENTER
+    ver_text = ft.Text ( 'Focuser V0.0.5  By B1lli', size=10, text_align=ft.alignment.center )
 
     page_initialize ()
     if not openai.api_key : change_activity_text ( '未检测到可用apikey，请在设置项里输入你的apikey，完成后请重启应用',
                                                    color='red' )
+
 
 
 if __name__ == '__main__' :
