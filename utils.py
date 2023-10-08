@@ -66,7 +66,9 @@ def send_notification(title, message):
             timeout=10  # 通知显示的时间（秒）
         )
     except Exception as e:
-        print(f'send_notification报错了: {e}')
+        error = f'send_notification报错了: {e}'
+        write_log(error,log_type='error')
+        print(error)
 
 def decode_chr(s):
     if type(s) != str:print(f'本次decode_chr类型非str，为{type(s)}')
@@ -100,10 +102,9 @@ class llm():
         :param user_query: content
         :return: content
         '''
-        messages = [
-            {"role" : "system", "content" : self.system_prompt},
-            {"role" : "user", "content" : user_query}
-        ]
+        messages = []
+        if self.system_prompt:messages.append({"role" : "system", "content" : self.system_prompt})
+        messages.append({"role" : "user", "content" : user_query})
         response = openai.ChatCompletion.create (
             model=self.model,
             messages=messages,
@@ -135,6 +136,11 @@ class llm():
         :param messages: message
         :param decode: bool，是否返回解码文字
         :return: 流式传输的content
+        用法：
+        life_messages = [{"role" : "user", "content" : "你好"}]
+        for age_event_delta in life_generator.stream_generate ( life_messages ) :
+            age_event_delta_lst.append ( age_event_delta )
+            print ( age_event_delta, end='' )
         '''
         completion = openai.ChatCompletion.create (
             model="gpt-3.5-turbo",
@@ -227,7 +233,6 @@ def display_statistics(window_durations, process_durations, switch_count):
     print(f"你总共切换了 {switch_count} 次窗口")
 
 
-
 class TitleRefiner :
 
     def __init__(self) :
@@ -278,3 +283,5 @@ class TitleRefiner :
 # refiner = TitleRefiner ()
 # print ( refiner.refine ( "崩坏3七周年同人放映厅 和另外 6个页面- 用户配置1-Microsoft Edge", "msedge.exe" ) )
 # print ( refiner.refine ( "微信", "WeChat.exe" ) )
+
+
