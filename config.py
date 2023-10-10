@@ -6,6 +6,7 @@
 """
 import os
 import json
+import platform
 
 default_data = {
     "提醒时间间隔（秒）" : 300,
@@ -19,11 +20,42 @@ default_data = {
     "tone_prompt" : "带感叹号的傲娇语气"
 }
 
+
+def get_appdata_path(filename=None) :
+    """
+    根据操作系统确定应用配置文件的路径，并确保它存在。
+    如果提供了文件名，将其添加到路径的末尾。
+
+    :param filename: str, optional
+        需要添加到路径末尾的文件名。
+    :return: str
+        配置文件的完整路径或文件夹的路径。
+    """
+
+    # 确定操作系统类型
+    if platform.system () == "Windows" :
+        appdata_path = os.path.expandvars ( "%APPDATA%\\Local\\Focuser" )
+    elif platform.system () == "Darwin" :  # macOS 的系统标识符
+        appdata_path = os.path.expanduser ( "~/Library/Application Support/Focuser" )
+    else :
+        raise SystemError ( "Unsupported OS" )
+
+    # 确保路径存在
+    os.makedirs ( appdata_path, exist_ok=True )
+
+    # 如果提供了文件名，将其添加到路径末尾
+    if filename :
+        return os.path.join ( appdata_path, filename )
+
+    return appdata_path
+
+
+
 def set_default_config():
     """
     检查配置文件是否存在，如果不存在则设置默认配置。
     """
-    path = os.path.expandvars("%APPDATA%\\Local\\Focuser\\config.txt")
+    path = get_appdata_path ('config.txt')
 
     # 如果配置文件已经存在，不做任何操作
     if os.path.exists(path):
@@ -44,7 +76,7 @@ def save_config(data):
     :param data: dict
         需要保存的配置信息。
     """
-    path = os.path.expandvars("%APPDATA%\\Local\\Focuser\\config.txt")
+    path = get_appdata_path('config.txt')
     os.makedirs(os.path.dirname(path), exist_ok=True)
 
     # 如果配置文件已存在，先读取现有的配置
@@ -75,7 +107,7 @@ def read_config(keys=None):
         包含读取的配置信息的字典。
         如果有傻孩子传了键字符串，那么就会返回键对应的值
     """
-    path = os.path.expandvars("%APPDATA%\\Local\\Focuser\\config.txt")
+    path = get_appdata_path("config.txt")
 
     if not os.path.exists(path):
         set_default_config()
@@ -99,3 +131,6 @@ def read_config(keys=None):
         return result
     else:
         return {**default_data, **data}
+
+if __name__ == '__main__':
+    print(get_appdata_path())

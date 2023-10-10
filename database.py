@@ -15,12 +15,10 @@ class Database:
     def __init__(self, db_name="focuser_data.db"):
         """Initialize the database connection and create the tables."""
         # Determine the Appdata/Local/Focuser directory
-        appdata_path = os.path.join(os.environ["LOCALAPPDATA"], "Focuser")
-        if not os.path.exists(appdata_path):
-            os.makedirs(appdata_path)
+        appdata_path = get_appdata_path()
 
         # Connect to the database in that directory
-        db_path = os.path.join(appdata_path, db_name)
+        db_path = get_appdata_path(db_name)
         self.conn = sqlite3.connect(db_path)
         self.cursor = self.conn.cursor()
         self.create_tables()

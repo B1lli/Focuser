@@ -26,8 +26,7 @@ import datetime
 
 def write_log(content, log_type=None) :
     # 获取AppData/Local路径
-    appdata_path = os.environ.get ( 'LOCALAPPDATA' )
-    focuser_dir = os.path.join ( appdata_path, 'Focuser' )
+    focuser_dir = get_appdata_path()
 
     # 确保目录存在
     if not os.path.exists ( focuser_dir ) :
