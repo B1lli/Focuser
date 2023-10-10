@@ -106,7 +106,7 @@ class llm():
         messages.append({"role" : "user", "content" : user_query})
         response = openai.ChatCompletion.create (
             model=self.model,
-            messages=messages,
+            messages=messages
         )
         self.single_generate_content = response["choices"][0]["message"]['content']
         if decode :
